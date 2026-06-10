@@ -69,6 +69,9 @@ func NewPgxpoolConfig(p PgxpoolConfigParams) *pgxpool.Config {
 	if p.ConnConfig.IPv4Only != nil && *p.ConnConfig.IPv4Only {
 		config.ConnConfig.LookupFunc = lookupFuncIPv4Only
 	}
+	if p.ConnConfig.IPv6Only != nil && *p.ConnConfig.IPv6Only {
+		config.ConnConfig.LookupFunc = lookupFuncIPv6Only
+	}
 	// TODO: deprecated, will be removed along with HostsLoadBalancing field
 	if p.ConnConfig.ServersLoadBalancing == nil && p.ConnConfig.HostsLoadBalancing != nil {
 		p.ConnConfig.ServersLoadBalancing = p.ConnConfig.HostsLoadBalancing
@@ -176,17 +179,37 @@ func lookupFuncIPv4Only(ctx context.Context, host string) (addrs []string, err e
 	if _, err := netip.ParseAddr(host); err == nil {
 		return []string{host}, nil
 	}
-	ips, err := net.LookupIP(host)
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
 	if err != nil {
 		return nil, err
 	}
 	var ipv4s []string
 	for _, ip := range ips {
-		if ipv4 := ip.To4(); ipv4 != nil {
+		if ipv4 := ip.IP.To4(); ipv4 != nil {
 			ipv4s = append(ipv4s, ipv4.String())
 		}
 	}
 	return ipv4s, nil
+}
+
+func lookupFuncIPv6Only(ctx context.Context, host string) (addrs []string, err error) {
+	if host == "" {
+		return nil, &net.DNSError{Err: "no such host", Name: host, IsNotFound: true}
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return []string{host}, nil
+	}
+	ips, err := net.DefaultResolver.LookupIPAddr(ctx, host)
+	if err != nil {
+		return nil, err
+	}
+	var ipv6s []string
+	for _, ip := range ips {
+		if ipv4 := ip.IP.To4(); ipv4 == nil {
+			ipv6s = append(ipv6s, ip.String())
+		}
+	}
+	return ipv6s, nil
 }
 
 // wrapLookupFuncWithLB is a workaround for hosts client-side load balancing
